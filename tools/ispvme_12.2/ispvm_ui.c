@@ -738,7 +738,7 @@ int main( int argc, char * argv[] )
     vme_out_string( VME_VERSION_NUMBER );
     vme_out_string(" Copyright 1998-2011.\n");
     vme_out_string( "\nFor daisy chain programming of all in-system programmable devices\n" );
-    vme_out_string( "\nCLS internal version 1.1.1 for Phalanx, Fishbone48, and Fishbone32.\n\n" );
+    vme_out_string( "\nCLS internal version 1.2.1 for Phalanx, Fishbone48, and Fishbone32.\n\n" );
 
     while( ( option = getopt(argc, argv, "f:c:h")) != -1 ){
         switch (option){

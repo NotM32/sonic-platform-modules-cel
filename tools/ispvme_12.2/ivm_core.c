@@ -2417,7 +2417,7 @@ void ispVMEnd()
 #endif
 
     ispVMStateMachine( RESET );   /*step devices to RESET state */
-    ispVMDelay( 0x8001 );              /*wake up devices*/
+    ispVMDelay( 1000 );              /*wake up devices*/
 }
 
 /***************************************************************
