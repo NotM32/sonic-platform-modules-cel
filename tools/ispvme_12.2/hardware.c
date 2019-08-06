@@ -122,14 +122,27 @@ void writePort( unsigned long a_ucPins, unsigned char a_ucValue )
     /* For Denverton */
     // isp_dnv_gpio_write(a_ucPins, (unsigned int) a_ucValue);
 
-    /* TODO: Convert to bit read/write function */
-    siIspPins = inl_p( g_ucOutPort );
-    if( a_ucValue ){
-        siIspPins |= (1U << a_ucPins);
+/*     
+ * NOTE:Experiment to use GPIO_USE_SEL for set logic level of TCK
+ */
+    if (a_ucPins == GPIO_TCK_CONFIG){
+        siIspPins = inl_p( GPIO_USE_SEL );
+        if( a_ucValue ){
+            siIspPins |= (1U << a_ucPins);  // set to GPIO mode
+        }else{
+            siIspPins &= ~(1U << a_ucPins); // set to native mode
+        }
+        outl_p(siIspPins, GPIO_USE_SEL);
     }else{
-        siIspPins &= ~(1U << a_ucPins);
+        /* TODO: Convert to bit read/write function */
+        siIspPins = inl_p( g_ucOutPort );
+        if( a_ucValue ){
+            siIspPins |= (1U << a_ucPins);
+        }else{
+            siIspPins &= ~(1U << a_ucPins);
+        }
+        outl_p(siIspPins, g_ucOutPort);
     }
-    outl_p(siIspPins, g_ucOutPort);
 }
 
 /*********************************************************************************

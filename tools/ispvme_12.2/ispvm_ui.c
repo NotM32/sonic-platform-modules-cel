@@ -735,6 +735,7 @@ int main( int argc, char * argv[] )
     int JTAG_chain = 0;
     int option;
     int iMaxRetry = 20;
+    unsigned long data = 0;
 
     //08/28/08 NN Added Calculate checksum support.
     g_usChecksum = 0;
@@ -745,7 +746,7 @@ int main( int argc, char * argv[] )
     vme_out_string( VME_VERSION_NUMBER );
     vme_out_string(" Copyright 1998-2011.\n");
     vme_out_string( "\nFor daisy chain programming of all in-system programmable devices\n" );
-    vme_out_string( "\nCLS internal version 1.1.2 for Phalanx, Fishbone48, and Fishbone32.\n\n" );
+    vme_out_string( "\nCLS internal version 1.1.4 for Phalanx, Fishbone48, and Fishbone32.\n\n" );
 
     while( ( option = getopt(argc, argv, "f:c:i:h")) != -1 ){
         switch (option){
@@ -816,7 +817,6 @@ int main( int argc, char * argv[] )
 
     /* TODO: Convert to bit read/write function */
     // Set ICHx GPIO_USE_SEL of TDI,TDO,TMS,TCK,GPIO14
-    unsigned long data = 0;
     data = inl_p(GPIO_USE_SEL);
     data |= (1U << GPIO_TCK_CONFIG);
     data |= (1U << GPIO_TMS_CONFIG);
@@ -841,11 +841,26 @@ int main( int argc, char * argv[] )
     data = inl_p(GP_IO_SEL3);
     data &= ~(1U << 6);
     outl_p(data, GP_IO_SEL3);
-    }
 
+/*     
+ * NOTE:Experiment to use GPIO_USE_SEL with external pull down to 
+ *      control the TCK logic level. Assume external pull down register.
+ *      1. Set TCK's GPIO_USE_SEL as 'native' (TCK = 0).
+ *      2. Set TCK's GP_LVL to 1 (always).
+ *      3. In sclock() toggle TCK with GPIO_USE_SEL.
+ */
+    data = inl_p(GPIO_USE_SEL);
+    data &= ~(1U << GPIO_TCK_CONFIG); // set to native mode (TCK = 0)
+    outl_p(data, GPIO_USE_SEL);
+
+    data = inl_p(GP_LVL);
+    data |= (1U << GPIO_TCK_CONFIG); // level always high
+    outl_p(data, GP_LVL);
+    }
     /* FIXME: export and setting GPIO register bank on the fly could cause a bug.
      * Plan to add the function to set/clear GPIO register bit for more sucure.
      */
+
     /* Switch to control JTAG chain muxes */
     switch (JTAG_chain){
         case 0:
@@ -909,6 +924,11 @@ int main( int argc, char * argv[] )
     // Set GPIO70 to Low
     g_ucOutPort = GP_LVL3;
     writePort( 6, 0x00 );
+
+    /* NOTE:Experiment, don't forget clear TCK's GP_LVL to low */
+    data = inl_p(GP_LVL);
+    data &= ~(1U << GPIO_TCK_CONFIG); // level always high
+    outl_p(data, GP_LVL);
 
     /* For Denverton CPU */
     // isp_dnv_gpio_deinit();
