@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.4"
+#define MOD_VERSION "0.5.5"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -362,8 +362,6 @@ static struct device* fpgafwdev = NULL;    // < The device-driver device struct 
 static struct mutex fpga_i2c_master_locks[I2C_MASTER_CH_TOTAL];
 /* Store lasted switch address and channel */
 static uint16_t fpga_i2c_lasted_access_port[I2C_MASTER_CH_TOTAL];
-static int nack_retry[I2C_MASTER_CH_TOTAL];
-static int need_retry[I2C_MASTER_CH_TOTAL];
 static int status_debug_en[I2C_MASTER_CH_TOTAL];
 
 enum PORT_TYPE {
@@ -1654,7 +1652,8 @@ static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writin
         }
 
         if (time_after(jiffies, timeout)) {
-            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X\n", __func__, master_bus, Status);
+            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X, TIP did not clear in %ldms\n",
+                     __func__, master_bus, Status, timeout);
             error = -ETIMEDOUT;
             break;
         }
@@ -1677,8 +1676,7 @@ static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writin
       */
     // Arbitration lost
     if (Status & (1 << I2C_STAT_AL)) {
-        info("Error arbitration lost");
-        nack_retry[master_bus - 1] = 1;
+        dev_dbg(&a->dev,"%s I2C_%d, Error AL\n", __func__, master_bus);
         return -EBUSY;
     }
 
@@ -1686,8 +1684,7 @@ static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writin
     if (Status & (1 << I2C_STAT_RxACK)) {
         info( "SL No ACK");
         if (writing) {
-            info("Error No ACK");
-            nack_retry[master_bus - 1] = 1;
+            dev_dbg(&a->dev,"%s I2C_%d, Error NACK\n", __func__, master_bus);
             return -EIO;
         }
     } else {
@@ -1740,7 +1737,8 @@ static int i2c_wait_stop(struct i2c_adapter *a, unsigned long timeout, int writi
         }
 
         if (time_after(jiffies, timeout)) {
-            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X\n", __func__, master_bus, Status);
+            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X, BUSY did not clear in %ldms\n",
+                     __func__, master_bus, Status, timeout);
             error = -ETIMEDOUT;
             break;
         }
@@ -1800,9 +1798,6 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
            size == 8 ? "I2C_BLOCK_DATA" :  "ERROR"
            , cmd);
 #endif
-
-    master_bus = dev_data->pca9548.master_bus;
-    error = i2c_core_init(master_bus, I2C_DIV_100K, fpga_dev.data_base_addr);
 
     /* Map the size to what the chip understands */
     switch (size) {
@@ -2005,10 +2000,6 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
             
             // Wait {A}
             error = i2c_wait_ack(adapter, 30, 0);
-            if(nack_retry[master_bus - 1] == 1)
-            {
-                need_retry[master_bus - 1] = 1;
-            }
             if (error < 0) {
                 dev_dbg(&adapter->dev,"Receive DATA Error: %d\n", error);
                 goto Done;
@@ -2163,30 +2154,23 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
     }
 
     // Do SMBus communication
-    nack_retry[master_bus - 1] = 0;
-    need_retry[master_bus - 1] = 0;
     status_debug_en[master_bus -1] = 0;
     error = smbus_access(adapter, addr, flags, rw, cmd, size, data);
-    if((nack_retry[master_bus - 1]==1)&&(need_retry[master_bus - 1]==1))
-        retry = 2000;
-    else
+    if(error == -EBUSY){
         retry = 5;
-    // If the first access failed, do retry.
-    while((nack_retry[master_bus - 1]==1)&&retry)
-    {
-        retry--;
-        nack_retry[master_bus - 1] = 0;
-        dev_dbg(&adapter->dev,"error = %d\n",error);
-        error = smbus_access(adapter, addr, flags, rw, cmd, size, data);
-        dev_dbg(&adapter->dev,"nack retry = %d\n",retry);
     }
-    nack_retry[master_bus - 1] = 0;
-    need_retry[master_bus - 1] = 0;
+    // If the first access failed, do retry.
+    while( (error < 0)  && retry){
+        dev_dbg(&adapter->dev,"Error I2C_%d: %d, accessing dev 0x%2.2X CMD 0x%2.2X, retry=%d/5\n", 
+                master_bus, error, addr, cmd, retry);
+        error = smbus_access(adapter, addr, flags, rw, cmd, size, data);
+        retry--;
+    }
 
     retval = error;
 
     if(error < 0){
-        dev_dbg( &adapter->dev,"smbus_xfer I2C_%d, failed (%d) @ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD %2.2X "
+        dev_dbg( &adapter->dev,"smbus_xfer I2C_%d, failed (%d) @ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD 0x%2.2X "
            , master_bus, error, addr, flags, rw, rw == 1 ? "READ " : "WRITE"
            , size,                  size == 0 ? "QUICK" :
            size == 1 ? "BYTE" :
@@ -2204,8 +2188,8 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
      *  For the bus w/o PCA9548 just check the return from last time.
      */
     if (switch_addr != 0xFF) {
+        dev_dbg(&adapter->dev,"I2C_%d, Try access I2C switch device at 0x%2.2x\n", master_bus, switch_addr);
         error = smbus_access(adapter, switch_addr, flags, I2C_SMBUS_READ, 0x00, I2C_SMBUS_BYTE, (union i2c_smbus_data*)&read_channel);
-        dev_dbg(&adapter->dev,"Try access I2C switch device at %2.2x\n", switch_addr);
         if(error < 0){
             dev_dbg(&adapter->dev,"Unbale to access switch device.\n");
         }else{
