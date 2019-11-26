@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.5"
+#define MOD_VERSION "0.5.6"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -1652,8 +1652,8 @@ static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writin
         }
 
         if (time_after(jiffies, timeout)) {
-            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X, TIP did not clear in %ldms\n",
-                     __func__, master_bus, Status, timeout);
+            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X, TIP did not clear in 30 ms\n",
+                     __func__, master_bus, Status);
             error = -ETIMEDOUT;
             break;
         }
@@ -1737,8 +1737,8 @@ static int i2c_wait_stop(struct i2c_adapter *a, unsigned long timeout, int writi
         }
 
         if (time_after(jiffies, timeout)) {
-            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X, BUSY did not clear in %ldms\n",
-                     __func__, master_bus, Status, timeout);
+            dev_warn(&a->dev, "%s I2C_%d, STATUS timeout: %2.2X, BUSY did not clear in 30 ms\n",
+                     __func__, master_bus, Status);
             error = -ETIMEDOUT;
             break;
         }
@@ -1846,7 +1846,7 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
     error = i2c_wait_ack(adapter, 30, 1);
     if (error < 0) {
         info( "get error %d", error);
-        dev_dbg(&adapter->dev,"START Error: %d\n", error);
+        dev_dbg(&adapter->dev,"I2C_%d, START Error: %d\n", master_bus, error);
         goto Done;
     }
 
@@ -1868,7 +1868,7 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
         error = i2c_wait_ack(adapter, 30, 1);
         if (error < 0) {
             info( "get error %d", error);
-            dev_dbg(&adapter->dev,"CMD Error: %d\n", error);
+            dev_dbg(&adapter->dev,"I2C_%d, CMD Error: %d\n", master_bus, error);
             goto Done;
         }
     }
@@ -1900,7 +1900,7 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
         error = i2c_wait_ack(adapter, 30, 1);
         if (error < 0) {
             info( "get error %d", error);
-            dev_dbg(&adapter->dev,"CNT Error: %d\n", error);
+            dev_dbg(&adapter->dev,"I2C_%d, CNT Error: %d\n", master_bus, error);
             goto Done;
         }
     }
@@ -1929,7 +1929,7 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
             // IACK
             error = i2c_wait_ack(adapter, 30, 1);
             if (error < 0) {
-                dev_dbg(&adapter->dev,"Send DATA Error: %d\n", error);
+                dev_dbg(&adapter->dev,"I2C_%d, Send DATA Error: %d\n", master_bus, error);
                 goto Done;
             }
         }
@@ -1952,7 +1952,7 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
         // Wait {A}
         error = i2c_wait_ack(adapter, 30, 1);
         if (error < 0) {
-            dev_dbg(&adapter->dev,"Repeat START Error: %d\n", error);
+            dev_dbg(&adapter->dev,"I2C_%d, Repeat START Error: %d\n", master_bus, error);
             goto Done;
         }
 
@@ -2001,7 +2001,14 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
             // Wait {A}
             error = i2c_wait_ack(adapter, 30, 0);
             if (error < 0) {
-                dev_dbg(&adapter->dev,"Receive DATA Error: %d\n", error);
+                dev_dbg(&adapter->dev,"I2C_%d Receive Error: %d, byte %d of type %d\n", 
+                        master_bus, error, size == 8 ? bid+1: bid, size);
+                if(error == -EBUSY){
+                    dev_dbg(&adapter->dev,"I2C_%d send READ_NACK, byte %d of type %d\n",
+                        master_bus,  size == 8 ? bid+1: bid, size);
+                    iowrite8(1 << I2C_CMD_RD | 1 << I2C_CMD_ACK, pci_bar + REG_CMD);
+                    ioread8(pci_bar + REG_DATA);
+                }
                 goto Done;
             }
             if(size == I2C_SMBUS_I2C_BLOCK_DATA){
@@ -2031,8 +2038,8 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
                 dev_err(&adapter->dev, "DATA IN [%d] %2.2X\n", bid+1, data->block[bid+1]);
             }
             dev_err(&adapter->dev, "read_ff portid %2d|@ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD %2.2X ",
-                portid, addr, flags, rw, rw == 1 ? "READ " : "WRITE",
-                size,                  size == 0 ? "QUICK" :
+                portid, addr, flags, rw, rw == 1 ? "READ " : "WRITE", size,
+                size == 0 ? "QUICK" :
                 size == 1 ? "BYTE" :
                 size == 2 ? "BYTE_DATA" :
                 size == 3 ? "WORD_DATA" :
@@ -2106,7 +2113,7 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
                 if(error >= 0){
                     break;
                 }else{
-                    dev_dbg(&adapter->dev,"Failed to deselect ch %d of 0x%x, CODE %d\n", prev_ch, prev_switch, error);
+                    dev_dbg(&adapter->dev,"I2C_%d, Failed to deselect ch %d of 0x%x, CODE %d\n", master_bus, prev_ch, prev_switch, error);
                 }
 
             }
@@ -2120,7 +2127,7 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
                 if(error >= 0){
                     break;
                 }else{
-                    dev_dbg(&adapter->dev,"Failed to select ch %d of 0x%x, CODE %d\n", channel, switch_addr, error);
+                    dev_dbg(&adapter->dev,"I2C_%d Failed to select ch %d of 0x%x, CODE %d\n", master_bus, channel, switch_addr, error);
                 }
 
             }
@@ -2140,7 +2147,7 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
                     if(error >= 0){
                         break;
                     }else{
-                        dev_dbg(&adapter->dev,"Failed to select ch %d of 0x%x, CODE %d\n", channel, switch_addr, error);
+                        dev_dbg(&adapter->dev,"I2C_%d Failed to select ch %d of 0x%x, CODE %d\n", master_bus, channel, switch_addr, error);
                     }
 
                 }
