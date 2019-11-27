@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.6"
+#define MOD_VERSION "0.5.8"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -1785,19 +1785,18 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
     dev_data = i2c_get_adapdata(adapter);
     portid = dev_data->portid;
     pci_bar = fpga_dev.data_base_addr;
+    master_bus = dev_data->pca9548.master_bus;
 
-#ifdef DEBUG_KERN
-    printk(KERN_INFO "portid %2d|@ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD %2.2X "
-           , portid, addr, flags, rw, rw == 1 ? "READ " : "WRITE"
-           , size,                  size == 0 ? "QUICK" :
+    dev_dbg(&adapter->dev, "I2C_%d portid %2d|@ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD 0x%2.2X\n",
+           master_bus, portid, addr, flags, rw, rw == 1 ? "READ " : "WRITE",
+           size,
+           size == 0 ? "QUICK" :
            size == 1 ? "BYTE" :
            size == 2 ? "BYTE_DATA" :
            size == 3 ? "WORD_DATA" :
            size == 4 ? "PROC_CALL" :
            size == 5 ? "BLOCK_DATA" :
-           size == 8 ? "I2C_BLOCK_DATA" :  "ERROR"
-           , cmd);
-#endif
+           size == 8 ? "I2C_BLOCK_DATA" :  "ERROR", cmd);
 
     /* Map the size to what the chip understands */
     switch (size) {
@@ -1813,8 +1812,6 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
         error = -EOPNOTSUPP;
         goto Done;
     }
-
-    master_bus = dev_data->pca9548.master_bus;
 
     if (master_bus < I2C_MASTER_CH_1 || master_bus > I2C_MASTER_CH_TOTAL) {
         error = -EINVAL;
@@ -2004,10 +2001,23 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
                 dev_dbg(&adapter->dev,"I2C_%d Receive Error: %d, byte %d of type %d\n", 
                         master_bus, error, size == 8 ? bid+1: bid, size);
                 if(error == -EBUSY){
-                    dev_dbg(&adapter->dev,"I2C_%d send READ_NACK, byte %d of type %d\n",
+                    dev_notice(&adapter->dev,"I2C_%d send READ_NACK to finish slave, byte %d of type %d\n",
                         master_bus,  size == 8 ? bid+1: bid, size);
+                    /* If we see Arbitration Lost when receiving data(generates by FPGA-core), 
+                     * then we try to send nine-clocks by generte receive data again with no-ack
+                     * to finish the slave device state machine.
+                     */
                     iowrite8(1 << I2C_CMD_RD | 1 << I2C_CMD_ACK, pci_bar + REG_CMD);
-                    ioread8(pci_bar + REG_DATA);
+                    error = i2c_wait_ack(adapter, 30, 0);
+                    if(error < 0 ){
+                        dev_err(&adapter->dev,"I2C_%d Failed to finish slave: %s type %d\n",
+                                master_bus, error, size);
+                    }else{
+                        data->block[bid+1] = ioread8(pci_bar + REG_DATA);
+                        dev_notice(&adapter->dev,"I2C_%d Data from receiv error 0x%2.2X\n",
+                                   master_bus, data->block[bid+1]);
+                    }
+
                 }
                 goto Done;
             }
@@ -2033,11 +2043,11 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
         }
         /* Detects 0xFF values and print the whole transaction out when consecutive FF found */
         if (ff_count >= 2) {
-            dev_err(&adapter->dev, "FFs found, READ=%d, FF_CNT=%d", cnt, ff_count);
+            dev_err(&adapter->dev, "FFs found, READ=%d, FF_CNT=%d\n", cnt, ff_count);
             for (bid = 0; bid < cnt; bid++) {
                 dev_err(&adapter->dev, "DATA IN [%d] %2.2X\n", bid+1, data->block[bid+1]);
             }
-            dev_err(&adapter->dev, "read_ff portid %2d|@ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD %2.2X ",
+            dev_err(&adapter->dev, "read_ff portid %2d|@ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD %2.2X\n",
                 portid, addr, flags, rw, rw == 1 ? "READ " : "WRITE", size,
                 size == 0 ? "QUICK" :
                 size == 1 ? "BYTE" :
