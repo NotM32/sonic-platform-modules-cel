@@ -24,7 +24,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.2"
+#define MOD_VERSION "0.5.3"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -426,6 +426,7 @@ static struct i2c_switch fpga_i2c_bus_dev[] = {
 #define FAN_I2C_CPLD_INDEX      SFF_PORT_TOTAL
 #define BB_I2C_CPLD_INDEX       SFF_PORT_TOTAL + 4
 #define SW_I2C_CPLD_INDEX       SFF_PORT_TOTAL + 6
+#define NUM_SWITCH_CPLDS        2
 
 struct fpga_device {
     /* data mmio region */
@@ -440,11 +441,26 @@ static struct fpga_device fpga_dev = {
     .data_mmio_len = 0,
 };
 
+/*
+ * struct fishbone32_fpga_data - Private data for fishbone32 switchboard driver.
+ * @sff_device:         List of optical module device node.
+ * @i2c_client:         List of optical module I2C client device.
+ * @i2c_adapter:        List of I2C adapter populates by this driver.
+ * @fpga_lock:          FPGA internal locks for register access.
+ * @sw_cpld_locks:      Switch CPLD xcvr resource lock.
+ * @fpga_read_addr:     Buffer point to FPGA's register.
+ * @cpld1_read_addr:    Buffer point to CPLD1's register.
+ * @cpld2_read_addr:    Buffer point to CPLD2's register.
+ *
+ * For *_read_addr, its temporary hold the register address to be read by
+ * getreg sysfs, see *getreg() for more details.
+ */
 struct fishbone32_fpga_data {
     struct device *sff_devices[SFF_PORT_TOTAL];
     struct i2c_client *sff_i2c_clients[SFF_PORT_TOTAL];
     struct i2c_adapter *i2c_adapter[VIRTUAL_I2C_PORT_LENGTH];
-    struct mutex fpga_lock;         // For FPGA internal lock
+    struct mutex fpga_lock;
+    struct mutex sw_cpld_locks[NUM_SWITCH_CPLDS];
     void __iomem * fpga_read_addr;
     uint8_t cpld1_read_addr;
     uint8_t cpld2_read_addr;
@@ -1154,35 +1170,69 @@ static void i2c_core_deinit(unsigned int master_bus,void __iomem *pci_bar){
     iowrite8( ioread8(pci_bar + REG_CTRL) & ~(1 << I2C_CTRL_EN| 1 << I2C_CTRL_IEN), pci_bar + REG_CTRL);
 }
 
-//FIXME: The hard code seperater below will causing bug!
-//Should pass configuration args into function.
+/*
+ * i2c_xcvr_access() - Optical port xcvr accessor through Switch CPLDs.
+ * @register_address: The xcvr register address.
+ * @portid:           Optical module port index, start from 1.
+ * @data:             Buffer to get or set data.
+ * @rw:               I2C_SMBUS_READ or I2C_SMBUS_WRITE flag.
+ *
+ * Fishbone32 have 2 switch CPLDs, Each CPLD manages 16 ports.
+ *
+ *  +------------------+------------------+
+ *  |1     CPLD1     15|17   CPLD2      31|
+ *  |2               16|18              32|
+ *  +------------------+------------------+
+ *
+ * Return: 0 if success, error code less than zero if fails.
+ */
 static int i2c_xcvr_access(u8 register_address, unsigned int portid, u8 *data, char rw){
     
     u16 dev_addr = 0;
     int err;
+    unsigned int sw_cpld_lock_index = 0;
+
     /* check for portid valid length */
     if(portid < 0 || portid > SFF_PORT_TOTAL){
         return -EINVAL;
     }
     if (portid <= 16 ){
         dev_addr = CPLD1_SLAVE_ADDR;
+        sw_cpld_lock_index = 0;
     }else{
         dev_addr = CPLD2_SLAVE_ADDR;
         portid = portid - 16;
+        sw_cpld_lock_index = 1;
     }
+
+    mutex_lock(&fpga_data->sw_cpld_locks[sw_cpld_lock_index]);
+
     // Select port
-    err = fpga_i2c_access(fpga_data->i2c_adapter[SW_I2C_CPLD_INDEX], dev_addr, 0x00, I2C_SMBUS_WRITE, 
-        I2C_XCVR_SEL, I2C_SMBUS_BYTE_DATA, (union i2c_smbus_data*)&portid);
+    err = fpga_i2c_access(fpga_data->i2c_adapter[SW_I2C_CPLD_INDEX],
+                          dev_addr,
+                          0x00,
+                          I2C_SMBUS_WRITE,
+                          I2C_XCVR_SEL,
+                          I2C_SMBUS_BYTE_DATA,
+                          (union i2c_smbus_data*)&portid);
     if(err < 0){
-        return err;
+        goto exit_unlock;
     }
     // Read/write port xcvr register
-    err = fpga_i2c_access(fpga_data->i2c_adapter[SW_I2C_CPLD_INDEX], dev_addr, 0x00, rw, 
-        register_address , I2C_SMBUS_BYTE_DATA, (union i2c_smbus_data*)data);
+    err = fpga_i2c_access(fpga_data->i2c_adapter[SW_I2C_CPLD_INDEX],
+                          dev_addr,
+                          0x00,
+                          rw,
+                          register_address,
+                          I2C_SMBUS_BYTE_DATA,
+                          (union i2c_smbus_data*)data);
     if(err < 0){
-        return err;
+        goto exit_unlock;
     }
-    return 0;
+
+exit_unlock:
+    mutex_unlock(&fpga_data->sw_cpld_locks[sw_cpld_lock_index]);
+    return err;
 }
 
 static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writing) {
@@ -1940,6 +1990,11 @@ static int fishbone32_drv_probe(struct platform_device *pdev)
     fpga_data->cpld2_read_addr = 0x00;
 
     mutex_init(&fpga_data->fpga_lock);
+
+    for (ret = 0; ret < NUM_SWITCH_CPLDS; ret++) {
+        mutex_init(&fpga_data->sw_cpld_locks[ret]);
+    }
+
     for (ret = I2C_MASTER_CH_1 ; ret <= I2C_MASTER_CH_TOTAL; ret++) {
         mutex_init(&fpga_i2c_master_locks[ret - 1]);
     }
