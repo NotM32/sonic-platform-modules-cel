@@ -2219,9 +2219,9 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
                 iowrite8( ioread8(fpga_dev.data_base_addr + 0x0108) | 0x0F, fpga_dev.data_base_addr + 0x0108);
             }else if(master_bus == I2C_MASTER_CH_12){
                 // LC1_I2C7_RST_N .. LC1_I2C4_RST_N
-                iowrite8( ioread8(fpga_dev.data_base_addr + 0x0108) & 0x8F, fpga_dev.data_base_addr + 0x0108);
+                iowrite8( ioread8(fpga_dev.data_base_addr + 0x0108) & 0x0F, fpga_dev.data_base_addr + 0x0108);
                 udelay(1);
-                iowrite8( ioread8(fpga_dev.data_base_addr + 0x0108) | 0x70, fpga_dev.data_base_addr + 0x0108);
+                iowrite8( ioread8(fpga_dev.data_base_addr + 0x0108) | 0xF0, fpga_dev.data_base_addr + 0x0108);
             }else if(master_bus == I2C_MASTER_CH_13){
                 // LC2_I2C3_RST_N .. LC2_I2C0_RST_N
                 iowrite8( ioread8(fpga_dev.data_base_addr + 0x010c) & 0xF0, fpga_dev.data_base_addr + 0x010c);
@@ -2229,9 +2229,9 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
                 iowrite8( ioread8(fpga_dev.data_base_addr + 0x010c) | 0x0F, fpga_dev.data_base_addr + 0x010c);
             }else if(master_bus == I2C_MASTER_CH_14){
                 // LC2_I2C7_RST_N .. LC2_I2C4_RST_N
-                iowrite8( ioread8(fpga_dev.data_base_addr + 0x010c) & 0x8F, fpga_dev.data_base_addr + 0x010c);
+                iowrite8( ioread8(fpga_dev.data_base_addr + 0x010c) & 0x0F, fpga_dev.data_base_addr + 0x010c);
                 udelay(1);
-                iowrite8( ioread8(fpga_dev.data_base_addr + 0x010c) | 0x70, fpga_dev.data_base_addr + 0x010c);
+                iowrite8( ioread8(fpga_dev.data_base_addr + 0x010c) | 0xF0, fpga_dev.data_base_addr + 0x010c);
             }
             // clear the last access port 
             fpga_i2c_lasted_access_port[master_bus - 1] = 0;
