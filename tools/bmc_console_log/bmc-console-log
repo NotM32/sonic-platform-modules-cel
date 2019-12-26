@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# Copyright 2019-present Celestica. All Rights Reserved.
+#
+# This program file is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for more details.
+#
+#
+# This script control BMC serial console logging service.
+#
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
+PIDFILE=/var/run/bmc-logger.pid
+
+case "$1" in
+start)
+    echo -n "Start BMC serial console logger.."
+    stty -F /dev/ttyS1 9600
+    logger -p user.info -t bmc#console -f /dev/ttyS1 &
+    echo $!> $PIDFILE
+    echo "done."
+    ;;
+stop)
+    echo -n "Stop BMC serial console logger.."
+    if [ -e $PIDFILE ]; then
+      kill `cat $PIDFILE`
+      rm $PIDFILE
+    fi
+    echo "done."
+    ;;
+*)
+    echo "Usage: $0 {start|stop}"
+esac
+
+exit 0

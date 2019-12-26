@@ -1,0 +1,12 @@
+[Unit]
+Description=BMC serial console logger
+After=rsyslog.service
+
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/bmc-console-log start
+ExecStop=/usr/local/bin/bmc-console-log stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

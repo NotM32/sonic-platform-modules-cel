@@ -13,3 +13,7 @@ systemctl start platform-modules-fishbone48.service
 # Enable heartbeat timer
 systemctl enable bmc_wdt.service
 systemctl start bmc_wdt.service
+
+# Enable bmc console logging service
+systemctl enable bmc-console-log.service
+systemctl start bmc-console-log.service

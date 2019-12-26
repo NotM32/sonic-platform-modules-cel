@@ -13,3 +13,5 @@ tools/bmcutil/bmc-exec /usr/local/bin
 tools/bmc_wdt/bmc_wdt.service etc/systemd/system
 tools/bmc_wdt/bmc_wdt.py /usr/local/etc/
 tools/power_utils/power /usr/local/bin
+tools/bmc_console_log/bmc-console-log /usr/local/bin
+tools/bmc_console_log/bmc-console-log.service etc/systemd/system
