@@ -1711,6 +1711,7 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
     calling_name = dev_data->pca9548.calling_name;
 
     // Acquire the master resource.
+    // Here we just use one mutex, it's a workaround for the sfp eeprom read/write issue.
     mutex_lock(&fpga_i2c_master_locks[0]);
     prev_port = fpga_i2c_lasted_access_port[master_bus - 1];
     prev_switch = (unsigned char)(prev_port >> 8) & 0xFF;
