@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.2"
+#define MOD_VERSION "0.5.3"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -1506,7 +1506,7 @@ static struct device * phalanx_sff_init(int portid) {
     new_data = kzalloc(sizeof(*new_data), GFP_KERNEL);
     if (!new_data) {
         printk(KERN_ALERT "Cannot alloc sff device data @port%d", portid);
-        return NULL;
+        return ERR_PTR(-ENOMEM);
     }
     /* The QSFP port ID start from 1 */
     new_data->portid = portid + 1;
@@ -1515,7 +1515,7 @@ static struct device * phalanx_sff_init(int portid) {
     if (IS_ERR(new_device)) {
         printk(KERN_ALERT "Cannot create sff device @port%d", portid);
         kfree(new_data);
-        return NULL;
+        return new_device;
     }
     return new_device;
 }
@@ -2409,6 +2409,164 @@ static struct i2c_board_info sff8436_eeprom_info[] = {
     { I2C_BOARD_INFO("optoe2", 0x50) }, //For SFP+ w/ sff8472
 };
 
+static int platfom_register_sysfs_nodes(struct platform_device *pdev) {
+
+    int ret = 0;
+
+    /* Create FPGA syfs node */
+    fpga = kobject_create_and_add("FPGA", &pdev->dev.kobj);
+    if (!fpga) {
+        ret = -ENOMEM;
+        goto err_exit;
+    }
+
+    ret = sysfs_create_group(fpga, &fpga_attr_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create FPGA sysfs attributes\n");
+        goto err_put_fpga;
+    }
+
+    /* Create Switch CPLD1 syfs node */
+    cpld1 = kobject_create_and_add("CPLD1", &pdev->dev.kobj);
+    if (!cpld1) {
+        sysfs_remove_group(fpga, &fpga_attr_grp);
+        ret = -ENOMEM;
+        goto err_rm_fpga_grp;
+    }
+    ret = sysfs_create_group(cpld1, &cpld1_attr_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create CPLD1 sysfs attributes\n");
+        goto err_put_cpld1;
+    }
+
+    /* Create Switch CPLD2 syfs node */
+    cpld2 = kobject_create_and_add("CPLD2", &pdev->dev.kobj);
+    if (!cpld2) {
+        ret = -ENOMEM;
+        goto err_rm_cpld1_grp;
+    }
+    ret = sysfs_create_group(cpld2, &cpld2_attr_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create CPLD2 sysfs attributes\n");
+        goto err_put_cpld2;
+    }
+
+    /* Create Switch CPLD3 syfs node */
+    cpld3 = kobject_create_and_add("CPLD3", &pdev->dev.kobj);
+    if (!cpld3) {
+        ret = -ENOMEM;
+        goto err_rm_cpld2_grp;
+    }
+    ret = sysfs_create_group(cpld3, &cpld3_attr_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create CPLD3 sysfs attributes\n");
+        goto err_put_cpld3;
+    }
+
+    /* Create Switch CPLD4 syfs node */
+    cpld4 = kobject_create_and_add("CPLD4", &pdev->dev.kobj);
+    if (!cpld4) {
+        ret = -ENOMEM;
+        goto err_rm_cpld3_grp;
+    }
+    ret = sysfs_create_group(cpld4, &cpld4_attr_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create CPLD4 sysfs attributes\n");
+        goto err_put_cpld4;
+    }
+
+    /* Create Switch FAN CPLD syfs node */
+    fancpld = kobject_create_and_add("FAN_CPLD", &pdev->dev.kobj);
+    if (!fancpld) {
+        ret = -ENOMEM;
+        goto err_rm_cpld4_grp;
+    }
+    if (!allow_unsafe_i2c_access)
+        ret = sysfs_create_group(fancpld, &fancpld_no_attr_grp);
+    else
+        ret = sysfs_create_group(fancpld, &fancpld_attr_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create FAN_CPLD sysfs attributes\n");
+        goto err_put_fancpld;
+    }
+
+    /* Create SFF device sysfs node */
+    sff_dev = device_create(fpgafwclass, NULL, MKDEV(0, 0), NULL, "sff_device");
+    if (IS_ERR(sff_dev)) {
+        printk(KERN_ERR "Failed to create sff device\n");
+        ret = PTR_ERR(sff_dev);
+        goto err_rm_fancpld_grp;
+    }
+
+    /* Attach SFF front panel LED test sysfs attributes to SFF node */
+    ret = sysfs_create_group(&sff_dev->kobj, &sff_led_test_grp);
+    if (ret != 0) {
+        printk(KERN_ERR "Cannot create SFF attributes\n");
+        goto err_destroy_sff;
+    }
+
+    ret = sysfs_create_link(&pdev->dev.kobj, &sff_dev->kobj, "SFF");
+    if (ret != 0) {
+        goto err_rm_led_grp;
+    }
+
+    return 0;
+
+err_rm_led_grp:
+    sysfs_remove_group(&sff_dev->kobj, &sff_led_test_grp);
+err_destroy_sff:
+    device_destroy(fpgafwclass, MKDEV(0, 0));
+err_rm_fancpld_grp:
+    sysfs_remove_group(fancpld, &fancpld_attr_grp);
+err_put_fancpld:
+    kobject_put(fancpld);
+err_rm_cpld4_grp:
+    sysfs_remove_group(cpld4, &cpld4_attr_grp);
+err_put_cpld4:
+    kobject_put(cpld4);
+err_rm_cpld3_grp:
+    sysfs_remove_group(cpld3, &cpld3_attr_grp);
+err_put_cpld3:
+    kobject_put(cpld3);
+err_rm_cpld2_grp:
+    sysfs_remove_group(cpld2, &cpld2_attr_grp);
+err_put_cpld2:
+    kobject_put(cpld2);
+err_rm_cpld1_grp:
+    sysfs_remove_group(cpld1, &cpld1_attr_grp);
+err_put_cpld1:
+    kobject_put(cpld1);
+err_rm_fpga_grp:
+    sysfs_remove_group(fpga, &fpga_attr_grp);
+err_put_fpga:
+    kobject_put(fpga);
+err_exit:
+    return ret;
+}
+
+/*
+ * Unregister kobject and sysfs nodes for platform driver.
+ * @pdev    platform device pointer.
+ */
+static void platfom_unregister_sysfs_nodes(struct platform_device *pdev) {
+
+    sysfs_remove_group(&sff_dev->kobj, &sff_led_test_grp);
+    device_destroy(fpgafwclass, MKDEV(0, 0));
+    sysfs_remove_group(fancpld, &fancpld_attr_grp);
+    kobject_put(fancpld);
+    sysfs_remove_group(cpld4, &cpld4_attr_grp);
+    kobject_put(cpld4);
+    sysfs_remove_group(cpld3, &cpld3_attr_grp);
+    kobject_put(cpld3);
+    sysfs_remove_group(cpld2, &cpld2_attr_grp);
+    kobject_put(cpld2);
+    sysfs_remove_group(cpld1, &cpld1_attr_grp);
+    kobject_put(cpld1);
+    sysfs_remove_group(fpga, &fpga_attr_grp);
+    kobject_put(fpga);
+}
+
+
 static int phalanx_drv_probe(struct platform_device *pdev)
 {
     struct resource *res;
@@ -2417,15 +2575,25 @@ static int phalanx_drv_probe(struct platform_device *pdev)
     uint8_t cpld1_version, cpld2_version, cpld3_version, cpld4_version;
     uint16_t prev_i2c_switch = 0;
     struct sff_device_data *sff_data;
+    struct i2c_dev_data *adap_data;
 
     /* The device class need to be instantiated before this function called */
     BUG_ON(fpgafwclass == NULL);
 
+    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+    if (!res) {
+        printk(KERN_ERR "Specified Resource Not Available...\n");
+        ret = -ENOMEM;
+        goto err_exit;
+    }
+
+    /* Allocate with devm_, so it will freed when platform device removed */
     fpga_data = devm_kzalloc(&pdev->dev, sizeof(struct phalanx_fpga_data),
                              GFP_KERNEL);
-
-    if (!fpga_data)
-        return -ENOMEM;
+    if (!fpga_data) {
+        ret = -ENOMEM;
+        goto err_exit;
+    }
 
     // Set default read address to VERSION
     fpga_data->fpga_read_addr = fpga_dev.data_base_addr + FPGA_VERSION;
@@ -2442,246 +2610,25 @@ static int phalanx_drv_probe(struct platform_device *pdev)
         mutex_init(&fpga_i2c_master_locks[ret - 1]);
     }
 
-    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    if (unlikely(!res)) {
-        printk(KERN_ERR "Specified Resource Not Available...\n");
-        kzfree(fpga_data);
-        return -1;
-    }
+    /* Enable I2C core modules */
+    for (portid_count = I2C_MASTER_CH_1; portid_count <= I2C_MASTER_CH_TOTAL; portid_count++) {
 
-    fpga = kobject_create_and_add("FPGA", &pdev->dev.kobj);
-    if (!fpga) {
-        kzfree(fpga_data);
-        return -ENOMEM;
-    }
-
-    ret = sysfs_create_group(fpga, &fpga_attr_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create FPGA sysfs attributes\n");
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    cpld1 = kobject_create_and_add("CPLD1", &pdev->dev.kobj);
-    if (!cpld1) {
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return -ENOMEM;
-    }
-    ret = sysfs_create_group(cpld1, &cpld1_attr_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create CPLD1 sysfs attributes\n");
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    cpld2 = kobject_create_and_add("CPLD2", &pdev->dev.kobj);
-    if (!cpld2) {
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return -ENOMEM;
-    }
-    ret = sysfs_create_group(cpld2, &cpld2_attr_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create CPLD2 sysfs attributes\n");
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    cpld3 = kobject_create_and_add("CPLD3", &pdev->dev.kobj);
-    if (!cpld3) {
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return -ENOMEM;
-    }
-    ret = sysfs_create_group(cpld3, &cpld3_attr_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create CPLD3 sysfs attributes\n");
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    cpld4 = kobject_create_and_add("CPLD4", &pdev->dev.kobj);
-    if (!cpld4) {
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return -ENOMEM;
-    }
-    ret = sysfs_create_group(cpld4, &cpld4_attr_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create CPLD4 sysfs attributes\n");
-        kobject_put(cpld4);
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    fancpld = kobject_create_and_add("FAN_CPLD", &pdev->dev.kobj);
-    if (!fancpld) {
-        sysfs_remove_group(cpld4, &cpld4_attr_grp);
-        kobject_put(cpld4);
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return -ENOMEM;
-    }
-    if(!allow_unsafe_i2c_access)
-        ret = sysfs_create_group(fancpld, &fancpld_no_attr_grp);
-    else
-        ret = sysfs_create_group(fancpld, &fancpld_attr_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create FAN_CPLD sysfs attributes\n");
-        kobject_put(fancpld);
-        sysfs_remove_group(cpld4, &cpld4_attr_grp);
-        kobject_put(cpld4);
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    sff_dev = device_create(fpgafwclass, NULL, MKDEV(0, 0), NULL, "sff_device");
-    if (IS_ERR(sff_dev)) {
-        printk(KERN_ERR "Failed to create sff device\n");
-        sysfs_remove_group(fancpld, &fancpld_attr_grp);
-        kobject_put(fancpld);
-        sysfs_remove_group(cpld4, &cpld4_attr_grp);
-        kobject_put(cpld4);
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return PTR_ERR(sff_dev);
-    }
-
-    ret = sysfs_create_group(&sff_dev->kobj, &sff_led_test_grp);
-    if (ret != 0) {
-        printk(KERN_ERR "Cannot create SFF attributes\n");
-        device_destroy(fpgafwclass, MKDEV(0, 0));
-        sysfs_remove_group(fancpld, &fancpld_attr_grp);
-        kobject_put(fancpld);
-        sysfs_remove_group(cpld4, &cpld4_attr_grp);
-        kobject_put(cpld4);
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    ret = sysfs_create_link(&pdev->dev.kobj, &sff_dev->kobj, "SFF");
-    if (ret != 0) {
-        sysfs_remove_group(&sff_dev->kobj, &sff_led_test_grp);
-        device_destroy(fpgafwclass, MKDEV(0, 0));
-        sysfs_remove_group(fancpld, &fancpld_attr_grp);
-        kobject_put(fancpld);
-        sysfs_remove_group(cpld4, &cpld4_attr_grp);
-        kobject_put(cpld4);
-        sysfs_remove_group(cpld3, &cpld3_attr_grp);
-        kobject_put(cpld3);
-        sysfs_remove_group(cpld2, &cpld2_attr_grp);
-        kobject_put(cpld2);
-        sysfs_remove_group(cpld1, &cpld1_attr_grp);
-        kobject_put(cpld1);
-        sysfs_remove_group(fpga, &fpga_attr_grp);
-        kobject_put(fpga);
-        kzfree(fpga_data);
-        return ret;
-    }
-
-    for (portid_count = I2C_MASTER_CH_1; portid_count <= I2C_MASTER_CH_TOTAL; portid_count++){
-
-        if(!allow_unsafe_i2c_access){
-            if( portid_count < I2C_MASTER_CH_7 ||  
-                portid_count == I2C_MASTER_CH_9 || portid_count == I2C_MASTER_CH_10 )
+        if (!allow_unsafe_i2c_access) {
+            if ( portid_count < I2C_MASTER_CH_7
+                    || portid_count == I2C_MASTER_CH_9
+                    || portid_count == I2C_MASTER_CH_10 )
                 continue;
         }
         ret = i2c_core_init(portid_count, I2C_DIV_100K, fpga_dev.data_base_addr);
         if (ret < 0) {
-            dev_err(&pdev->dev, "Unable to init I2C core %d\n", portid_count);
-            sysfs_remove_group(&sff_dev->kobj, &sff_led_test_grp);
-            device_destroy(fpgafwclass, MKDEV(0, 0));
-            sysfs_remove_group(fancpld, &fancpld_attr_grp);
-            kobject_put(fancpld);
-            sysfs_remove_group(cpld4, &cpld4_attr_grp);
-            kobject_put(cpld4);
-            sysfs_remove_group(cpld3, &cpld3_attr_grp);
-            kobject_put(cpld3);
-            sysfs_remove_group(cpld2, &cpld2_attr_grp);
-            kobject_put(cpld2);
-            sysfs_remove_group(cpld1, &cpld1_attr_grp);
-            kobject_put(cpld1);
-            sysfs_remove_group(fpga, &fpga_attr_grp);
-            kobject_put(fpga);
-            kzfree(fpga_data);
-            return ret;
+            goto err_deinit_i2c;
         }
     }
 
+    /* Register platform's I2C adapters */
     for (portid_count = 0 ; portid_count < VIRTUAL_I2C_PORT_LENGTH ; portid_count++) {
-        if(!allow_unsafe_i2c_access){
-            if( portid_count >= FAN_I2C_CPLD_INDEX && portid_count < SW1_I2C_CPLD_INDEX ){
+        if (!allow_unsafe_i2c_access) {
+            if ( portid_count >= FAN_I2C_CPLD_INDEX && portid_count < SW1_I2C_CPLD_INDEX ) {
                 fpga_data->i2c_adapter[portid_count] = NULL;
                 continue;
             }
@@ -2689,11 +2636,23 @@ static int phalanx_drv_probe(struct platform_device *pdev)
         fpga_data->i2c_adapter[portid_count] = phalanx_i2c_init(pdev, portid_count, VIRTUAL_I2C_BUS_OFFSET);
     }
 
-    /* Init SFF devices */
+    printk(KERN_INFO "Virtual I2C buses created\n");
+
+    /* Add platform's sysfs nodes and attributes */
+    ret = platfom_register_sysfs_nodes(pdev);
+    if (ret < 0) {
+        goto err_clean_adapter;
+    }
+
+    /* Register front panel ports device nodes and attach I2C EEPROM client */
     for (portid_count = 0; portid_count < SFF_PORT_TOTAL; portid_count++) {
         struct i2c_adapter *i2c_adap = fpga_data->i2c_adapter[portid_count];
         if (i2c_adap) {
             fpga_data->sff_devices[portid_count] = phalanx_sff_init(portid_count);
+            if (IS_ERR(fpga_data->sff_devices[portid_count])) {
+                ret = PTR_ERR(fpga_data->sff_devices[portid_count]);
+                goto err_clean_sff;
+            }
             sff_data = dev_get_drvdata(fpga_data->sff_devices[portid_count]);
             BUG_ON(sff_data == NULL);
             if ( sff_data->port_type == QSFP ) {
@@ -2708,7 +2667,6 @@ static int phalanx_drv_probe(struct platform_device *pdev)
         }
     }
 
-    printk(KERN_INFO "Virtual I2C buses created\n");
 
 #ifdef TEST_MODE
     return 0;
@@ -2731,8 +2689,8 @@ static int phalanx_drv_probe(struct platform_device *pdev)
     /* Init I2C buses that has PCA9548 switch device. */
     for (portid_count = 0; portid_count < VIRTUAL_I2C_PORT_LENGTH; portid_count++) {
 
-        if(!allow_unsafe_i2c_access){
-            if( portid_count >= FAN_I2C_CPLD_INDEX && portid_count < SW1_I2C_CPLD_INDEX ){
+        if (!allow_unsafe_i2c_access) {
+            if ( portid_count >= FAN_I2C_CPLD_INDEX && portid_count < SW1_I2C_CPLD_INDEX ) {
                 continue;
             }
         }
@@ -2754,7 +2712,43 @@ static int phalanx_drv_probe(struct platform_device *pdev)
             }
         }
     }
+
     return 0;
+
+err_clean_sff:
+    /* Remove I2C EEPROM client and unregister sff device nodes */
+    for (portid_count = 0; portid_count < SFF_PORT_TOTAL; portid_count++) {
+        if (!IS_ERR(fpga_data->sff_devices[portid_count])) {
+            sysfs_remove_link(&fpga_data->sff_devices[portid_count]->kobj, "i2c");
+            i2c_unregister_device(fpga_data->sff_i2c_clients[portid_count]);
+            sff_data = dev_get_drvdata(fpga_data->sff_devices[portid_count]);
+            device_unregister(fpga_data->sff_devices[portid_count]);
+            kfree(sff_data);
+        }
+    }
+err_clean_adapter:
+    /* Unregister platform's I2C adapters */
+    for (portid_count = 0 ; portid_count < VIRTUAL_I2C_PORT_LENGTH ; portid_count++) {
+        if (fpga_data->i2c_adapter[portid_count] != NULL) {
+            info(KERN_INFO "<%x>", fpga_data->i2c_adapter[portid_count]);
+            adap_data = i2c_get_adapdata(fpga_data->i2c_adapter[portid_count]);
+            i2c_del_adapter(fpga_data->i2c_adapter[portid_count]);
+            kfree(adap_data);
+        }
+    }
+err_deinit_i2c:
+    /* Disable I2C core modules */
+    for (portid_count = I2C_MASTER_CH_1; portid_count <= I2C_MASTER_CH_TOTAL; portid_count++) {
+        if (!allow_unsafe_i2c_access) {
+            if (portid_count < I2C_MASTER_CH_7
+                    || portid_count == I2C_MASTER_CH_9
+                    || portid_count == I2C_MASTER_CH_10)
+                continue;
+        }
+        i2c_core_deinit(portid_count, fpga_dev.data_base_addr);
+    }
+err_exit:
+    return ret;
 }
 
 static int phalanx_drv_remove(struct platform_device *pdev)
@@ -2763,52 +2757,40 @@ static int phalanx_drv_remove(struct platform_device *pdev)
     struct sff_device_data *rem_data;
     struct i2c_dev_data *adap_data;
 
+    /* Remove I2C EEPROM client and unregister sff device nodes */
     for (portid_count = 0; portid_count < SFF_PORT_TOTAL; portid_count++) {
-        sysfs_remove_link(&fpga_data->sff_devices[portid_count]->kobj, "i2c");
-        i2c_unregister_device(fpga_data->sff_i2c_clients[portid_count]);
+        if (!IS_ERR(fpga_data->sff_devices[portid_count])) {
+            sysfs_remove_link(&fpga_data->sff_devices[portid_count]->kobj, "i2c");
+            i2c_unregister_device(fpga_data->sff_i2c_clients[portid_count]);
+            rem_data = dev_get_drvdata(fpga_data->sff_devices[portid_count]);
+            device_unregister(fpga_data->sff_devices[portid_count]);
+            kfree(rem_data);
+        }
     }
 
+    /* Unregister platform's syfs nodes */
+    platfom_unregister_sysfs_nodes(pdev);
+
+    /* Unregister platform's I2C adapters */
     for (portid_count = 0 ; portid_count < VIRTUAL_I2C_PORT_LENGTH ; portid_count++) {
         if (fpga_data->i2c_adapter[portid_count] != NULL) {
             info(KERN_INFO "<%x>", fpga_data->i2c_adapter[portid_count]);
             adap_data = i2c_get_adapdata(fpga_data->i2c_adapter[portid_count]);
             i2c_del_adapter(fpga_data->i2c_adapter[portid_count]);
+            kfree(adap_data);
         }
     }
 
-    for (portid_count = I2C_MASTER_CH_1; portid_count <= I2C_MASTER_CH_TOTAL; portid_count++){
-        if(!allow_unsafe_i2c_access){
-            if( portid_count < I2C_MASTER_CH_7 ||  
-                portid_count == I2C_MASTER_CH_9 || portid_count == I2C_MASTER_CH_10 )
+    /* Disable I2C cores */
+    for (portid_count = I2C_MASTER_CH_1; portid_count <= I2C_MASTER_CH_TOTAL; portid_count++) {
+        if (!allow_unsafe_i2c_access) {
+            if ( portid_count < I2C_MASTER_CH_7
+                    || portid_count == I2C_MASTER_CH_9
+                    || portid_count == I2C_MASTER_CH_10 )
                 continue;
         }
         i2c_core_deinit(portid_count, fpga_dev.data_base_addr);
     }
-
-    for (portid_count = 0; portid_count < SFF_PORT_TOTAL; portid_count++) {
-        if (fpga_data->sff_devices[portid_count] != NULL) {
-            rem_data = dev_get_drvdata(fpga_data->sff_devices[portid_count]);
-            device_unregister(fpga_data->sff_devices[portid_count]);
-            put_device(fpga_data->sff_devices[portid_count]);
-            kfree(rem_data);
-        }
-    }
-
-    sysfs_remove_group(fpga, &fpga_attr_grp);
-    sysfs_remove_group(cpld1, &cpld1_attr_grp);
-    sysfs_remove_group(cpld2, &cpld2_attr_grp);
-    sysfs_remove_group(cpld3, &cpld3_attr_grp);
-    sysfs_remove_group(cpld4, &cpld4_attr_grp);
-    sysfs_remove_group(fancpld, &fancpld_attr_grp);
-    sysfs_remove_group(&sff_dev->kobj, &sff_led_test_grp);
-    kobject_put(fpga);
-    kobject_put(cpld1);
-    kobject_put(cpld2);
-    kobject_put(cpld3);
-    kobject_put(cpld4);
-    kobject_put(fancpld);
-    device_destroy(fpgafwclass, MKDEV(0, 0));
-    devm_kfree(&pdev->dev, fpga_data);
     return 0;
 }
 
@@ -2825,8 +2807,6 @@ static struct platform_driver phalanx_drv = {
 #else
 #define FPGA_PCI_BAR_NUM 0
 #endif
-
-
 
 static const struct pci_device_id fpga_id_table[] = {
     {  PCI_VDEVICE(XILINX, FPGA_PCIE_DEVICE_ID) },
