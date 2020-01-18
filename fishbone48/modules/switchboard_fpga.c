@@ -25,7 +25,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.1"
+#define MOD_VERSION "0.5.2-rc2"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -1253,8 +1253,9 @@ exit_unlock:
 static int i2c_wait_stop(struct i2c_adapter *a, unsigned long timeout, int writing) {
     int error = 0;
     int Status;
+    unsigned int master_bus;
 
-    struct i2c_dev_data *new_data = i2c_get_adapdata(a);
+    struct i2c_dev_data *new_data;
     void __iomem *pci_bar = fpga_dev.data_base_addr;
 
     unsigned int REG_FREQ_L;
@@ -1264,7 +1265,16 @@ static int i2c_wait_stop(struct i2c_adapter *a, unsigned long timeout, int writi
     unsigned int REG_STAT;
     unsigned int REG_DATA;
 
-    unsigned int master_bus = new_data->pca9548.master_bus;
+    /* Sanity check for the NULL pointer */
+    if (a == NULL)
+        return -ESHUTDOWN;
+    else
+        new_data = i2c_get_adapdata(a);
+
+    if (new_data == NULL)
+        return -ESHUTDOWN;
+
+    master_bus = new_data->pca9548.master_bus;
 
     if (master_bus < I2C_MASTER_CH_1 || master_bus > I2C_MASTER_CH_TOTAL) {
         error = -EINVAL;
@@ -1315,8 +1325,9 @@ static int i2c_wait_stop(struct i2c_adapter *a, unsigned long timeout, int writi
 static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writing) {
     int error = 0;
     int Status;
+    unsigned int master_bus;
 
-    struct i2c_dev_data *new_data = i2c_get_adapdata(a);
+    struct i2c_dev_data *new_data;
     void __iomem *pci_bar = fpga_dev.data_base_addr;
 
     unsigned int REG_FREQ_L;
@@ -1326,7 +1337,16 @@ static int i2c_wait_ack(struct i2c_adapter *a, unsigned long timeout, int writin
     unsigned int REG_STAT;
     unsigned int REG_DATA;
 
-    unsigned int master_bus = new_data->pca9548.master_bus;
+    /* Sanity check for the NULL pointer */
+    if (a == NULL)
+        return -ESHUTDOWN;
+    else
+        new_data = i2c_get_adapdata(a);
+
+    if (new_data == NULL)
+        return -ESHUTDOWN;
+
+    master_bus = new_data->pca9548.master_bus;
 
     if (master_bus < I2C_MASTER_CH_1 || master_bus > I2C_MASTER_CH_TOTAL) {
         error = -EINVAL;
@@ -1427,10 +1447,18 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
     REG_STAT   = 0;
     REG_DATA   = 0;
 
-    /* Write the command register */
-    dev_data = i2c_get_adapdata(adapter);
+    /* Sanity check for the NULL pointer */
+    if (adapter == NULL)
+        return -ESHUTDOWN;
+    else
+        dev_data = i2c_get_adapdata(adapter);
+
+    if (dev_data == NULL)
+        return -ESHUTDOWN;
+
     portid = dev_data->portid;
     pci_bar = fpga_dev.data_base_addr;
+    master_bus = dev_data->pca9548.master_bus;
 
 #ifdef DEBUG_KERN
     printk(KERN_INFO "portid %2d|@ 0x%2.2X|f 0x%4.4X|(%d)%-5s| (%d)%-10s|CMD %2.2X "
@@ -1445,9 +1473,6 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
            , cmd);
 #endif
 
-    master_bus = dev_data->pca9548.master_bus;
-    error = i2c_core_init(master_bus, I2C_DIV_100K, fpga_dev.data_base_addr);
-
     /* Map the size to what the chip understands */
     switch (size) {
     case I2C_SMBUS_QUICK:
@@ -1459,14 +1484,14 @@ static int smbus_access(struct i2c_adapter *adapter, u16 addr,
         break;
     default:
         printk(KERN_INFO "Unsupported transaction %d\n", size);
-        error = -EOPNOTSUPP;
-        goto Done;
+        return -EOPNOTSUPP;
     }
 
     if (master_bus < I2C_MASTER_CH_1 || master_bus > I2C_MASTER_CH_TOTAL) {
-        error = -EINVAL;
-        goto Done;
+        return -EINVAL;
     }
+
+    error = i2c_core_init(master_bus, I2C_DIV_100K, fpga_dev.data_base_addr);
 
     REG_FREQ_L = I2C_MASTER_FREQ_L  + (master_bus - 1) * 0x20;
     REG_FREQ_H = I2C_MASTER_FREQ_H  + (master_bus - 1) * 0x20;
@@ -1704,7 +1729,15 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
     uint8_t read_channel;
     int retry = 0;
 
-    dev_data = i2c_get_adapdata(adapter);
+    /* Sanity check for the NULL pointer */
+    if (adapter == NULL)
+        return -ESHUTDOWN;
+    else
+        dev_data = i2c_get_adapdata(adapter);
+
+    if (dev_data == NULL)
+        return -ESHUTDOWN;
+    
     master_bus = dev_data->pca9548.master_bus;
     switch_addr = dev_data->pca9548.switch_addr;
     channel = dev_data->pca9548.channel;
