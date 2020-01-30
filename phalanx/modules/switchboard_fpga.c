@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.3-rc2"
+#define MOD_VERSION "0.5.3-rc2-dbg2"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -2271,7 +2271,7 @@ static int fpga_i2c_access(struct i2c_adapter *adapter, u16 addr,
         error = smbus_access(adapter, switch_addr, flags, I2C_SMBUS_READ, 0x00, I2C_SMBUS_BYTE, (union i2c_smbus_data*)&read_channel);
         dev_dbg(&adapter->dev,"Try access I2C switch device at %2.2x\n", switch_addr);
         if(error < 0){
-            dev_dbg(&adapter->dev,"Unbale to access switch device.\n");
+            dev_dbg(&adapter->dev,"Unable to access switch device.\n");
         }else{
             dev_dbg(&adapter->dev,"Read success, register val %2.2x\n", read_channel);
         }
@@ -2907,22 +2907,24 @@ static int fpga_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
     printk(KERN_INFO "");
     fpga_version = ioread32(fpga_dev.data_base_addr);
     printk(KERN_INFO "FPGA Version : %8.8x\n", fpga_version);
-    fpgafw_init();
-    platform_device_register(&phalanx_dev);
-    platform_driver_register(&phalanx_drv);
+    if ((err = fpgafw_init()) < 0){
+        goto pci_release;
+    }
+    // platform_device_register(&phalanx_dev);
+    // platform_driver_register(&phalanx_drv);
     return 0;
 
 pci_release:
     pci_release_regions(pdev);
 pci_disable:
     pci_disable_device(pdev);
-    return -EBUSY;
+    return err;
 }
 
 static void fpga_pci_remove(struct pci_dev *pdev)
 {
-    platform_driver_unregister(&phalanx_drv);
-    platform_device_unregister(&phalanx_dev);
+    // platform_driver_unregister(&phalanx_drv);
+    // platform_device_unregister(&phalanx_dev);
     fpgafw_exit();
     pci_iounmap(pdev, fpga_dev.data_base_addr);
     pci_release_regions(pdev);
@@ -3030,8 +3032,8 @@ static int fpgafw_init(void) {
     // Register the device class
     fpgafwclass = class_create(THIS_MODULE, CLASS_NAME);
     if (IS_ERR(fpgafwclass)) {               // Check for error and clean up if there is
+        printk(KERN_ALERT "Failed to register %s class: %ld\n", CLASS_NAME, PTR_ERR(fpgafwclass));
         unregister_chrdev(majorNumber, DEVICE_NAME);
-        printk(KERN_ALERT "Failed to register device class\n");
         return PTR_ERR(fpgafwclass);
     }
     printk(KERN_INFO "Device class registered correctly\n");
