@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.3-rc2-dbg5"
+#define MOD_VERSION "0.5.3-rc3"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -2910,8 +2910,8 @@ static int fpga_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
     if ((err = fpgafw_init()) < 0){
         goto pci_release;
     }
-    // platform_device_register(&phalanx_dev);
-    // platform_driver_register(&phalanx_drv);
+    platform_device_register(&phalanx_dev);
+    platform_driver_register(&phalanx_drv);
     return 0;
 
 pci_release:
@@ -2923,8 +2923,8 @@ pci_disable:
 
 static void fpga_pci_remove(struct pci_dev *pdev)
 {
-    // platform_driver_unregister(&phalanx_drv);
-    // platform_device_unregister(&phalanx_dev);
+    platform_driver_unregister(&phalanx_drv);
+    platform_device_unregister(&phalanx_dev);
     fpgafw_exit();
     pci_iounmap(pdev, fpga_dev.data_base_addr);
     pci_release_regions(pdev);
@@ -3022,39 +3022,38 @@ const struct file_operations fpgafw_fops = {
 static int fpgafw_init(void) {
     printk(KERN_INFO "Initializing the switchboard driver\n");
     // Try to dynamically allocate a major number for the device -- more difficult but worth it
-    // majorNumber = register_chrdev(0, DEVICE_NAME, &fpgafw_fops);
-    // if (majorNumber < 0) {
-    //     printk(KERN_ALERT "Failed to register a major number\n");
-    //     return majorNumber;
-    // }
-    // printk(KERN_INFO "Device registered correctly with major number %d\n", majorNumber);
+    majorNumber = register_chrdev(0, DEVICE_NAME, &fpgafw_fops);
+    if (majorNumber < 0) {
+        printk(KERN_ALERT "Failed to register a major number\n");
+        return majorNumber;
+    }
+    printk(KERN_INFO "Device registered correctly with major number %d\n", majorNumber);
 
     // Register the device class
     fpgafwclass = class_create(THIS_MODULE, CLASS_NAME);
     if (IS_ERR(fpgafwclass)) {               // Check for error and clean up if there is
         printk(KERN_ALERT "Failed to register %s class: %ld\n", CLASS_NAME, PTR_ERR(fpgafwclass));
-        // unregister_chrdev(majorNumber, DEVICE_NAME);
+        unregister_chrdev(majorNumber, DEVICE_NAME);
         return PTR_ERR(fpgafwclass);
     }
     printk(KERN_INFO "Device class registered correctly\n");
 
     // Register the device driver
-    // fpgafwdev = device_create(fpgafwclass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-    // if (IS_ERR(fpgafwdev)) {                  // Clean up if there is an error
-    //     class_destroy(fpgafwclass);           // Repeated code but the alternative is goto statements
-    //     unregister_chrdev(majorNumber, DEVICE_NAME);
-    //     printk(KERN_ALERT "Failed to create the FW upgrade device node\n");
-    //     return PTR_ERR(fpgafwdev);
-    // }
-    // printk(KERN_INFO "FPGA fw upgrade device node created correctly\n");
+    fpgafwdev = device_create(fpgafwclass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+    if (IS_ERR(fpgafwdev)) {                  // Clean up if there is an error
+        class_destroy(fpgafwclass);           // Repeated code but the alternative is goto statements
+        unregister_chrdev(majorNumber, DEVICE_NAME);
+        printk(KERN_ALERT "Failed to create the FW upgrade device node\n");
+        return PTR_ERR(fpgafwdev);
+    }
+    printk(KERN_INFO "FPGA fw upgrade device node created correctly\n");
     return 0;
 }
 
 static void fpgafw_exit(void) {
-    // device_destroy(fpgafwclass, MKDEV(majorNumber, 0));     // remove the device
-    // class_unregister(fpgafwclass);                          // unregister the device class
+    device_destroy(fpgafwclass, MKDEV(majorNumber, 0));     // remove the device
     class_destroy(fpgafwclass);                             // remove the device class
-    // unregister_chrdev(majorNumber, DEVICE_NAME);            // unregister the major number
+    unregister_chrdev(majorNumber, DEVICE_NAME);            // unregister the major number
     printk(KERN_INFO "Goodbye!\n");
 }
 
