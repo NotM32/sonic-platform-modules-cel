@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.3-rc2-dbg2"
+#define MOD_VERSION "0.5.3-rc2-dbg3"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -2907,9 +2907,9 @@ static int fpga_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
     printk(KERN_INFO "");
     fpga_version = ioread32(fpga_dev.data_base_addr);
     printk(KERN_INFO "FPGA Version : %8.8x\n", fpga_version);
-    if ((err = fpgafw_init()) < 0){
-        goto pci_release;
-    }
+    // if ((err = fpgafw_init()) < 0){
+    //     goto pci_release;
+    // }
     // platform_device_register(&phalanx_dev);
     // platform_driver_register(&phalanx_drv);
     return 0;
@@ -2925,7 +2925,7 @@ static void fpga_pci_remove(struct pci_dev *pdev)
 {
     // platform_driver_unregister(&phalanx_drv);
     // platform_device_unregister(&phalanx_dev);
-    fpgafw_exit();
+    // fpgafw_exit();
     pci_iounmap(pdev, fpga_dev.data_base_addr);
     pci_release_regions(pdev);
     pci_disable_device(pdev);
