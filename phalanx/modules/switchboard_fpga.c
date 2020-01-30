@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.3-rc2-dbg4"
+#define MOD_VERSION "0.5.3-rc2-dbg5"
 #else
 #define MOD_VERSION "TEST"
 #endif
@@ -3052,7 +3052,7 @@ static int fpgafw_init(void) {
 
 static void fpgafw_exit(void) {
     // device_destroy(fpgafwclass, MKDEV(majorNumber, 0));     // remove the device
-    class_unregister(fpgafwclass);                          // unregister the device class
+    // class_unregister(fpgafwclass);                          // unregister the device class
     class_destroy(fpgafwclass);                             // remove the device class
     // unregister_chrdev(majorNumber, DEVICE_NAME);            // unregister the major number
     printk(KERN_INFO "Goodbye!\n");
