@@ -23,7 +23,7 @@
  */
 
 #ifndef TEST_MODE
-#define MOD_VERSION "0.5.3-rc2"
+#define MOD_VERSION "0.5.3"
 #else
 #define MOD_VERSION "TEST"
 #endif
